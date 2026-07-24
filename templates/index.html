@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScaryURL — Make Any Link Look Suspicious</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: #0d0d0d;
+            color: #e0e0e0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .card {
+            background: #1a1a1a;
+            border: 1px solid #ff3b30;
+            border-radius: 12px;
+            max-width: 540px;
+            width: 100%;
+            padding: 40px 36px;
+            box-shadow: 0 0 40px rgba(255, 59, 48, 0.15);
+        }
+
+        .warning-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #ff3b30;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 28px;
+            line-height: 1.5;
+        }
+
+        .input-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        input[type="url"] {
+            flex: 1;
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: #111;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-family: "SF Mono", "Fira Code", monospace;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+
+        input[type="url"]:focus {
+            border-color: #ff3b30;
+        }
+
+        input[type="url"]::placeholder {
+            color: #555;
+        }
+
+        .btn-shorten {
+            padding: 12px 20px;
+            border-radius: 8px;
+            border: none;
+            background: #ff3b30;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+            white-space: nowrap;
+        }
+
+        .btn-shorten:hover { opacity: 0.85; }
+        .btn-shorten:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .result {
+            display: none;
+            background: #111;
+            border-radius: 8px;
+            padding: 14px 16px;
+        }
+
+        .result label {
+            display: block;
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: #555;
+            margin-bottom: 4px;
+        }
+
+        .result a {
+            font-size: 14px;
+            font-family: "SF Mono", "Fira Code", monospace;
+            color: #ff453a;
+            text-decoration: none;
+            word-break: break-all;
+        }
+
+        .result a:hover {
+            text-decoration: underline;
+        }
+
+        .error {
+            color: #ff453a;
+            font-size: 13px;
+            margin-top: 8px;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="warning-icon">👻</div>
+        <h1>ScaryURL</h1>
+        <p class="subtitle">
+            Make any URL look suspicious. Paste a link below and we'll generate
+            a scary-looking redirect that will make anyone think twice before clicking.
+        </p>
+
+        <div class="input-group">
+            <input type="url" id="url-input" placeholder="https://example.com" required>
+            <button class="btn-shorten" id="shorten-btn">Shorten</button>
+        </div>
+
+        <p class="error" id="error-msg"></p>
+
+        <div class="result" id="result">
+            <label>Your scary link</label>
+            <a id="result-link" href="#" target="_blank"></a>
+        </div>
+    </div>
+
+    <script>
+        const input = document.getElementById('url-input');
+        const btn = document.getElementById('shorten-btn');
+        const result = document.getElementById('result');
+        const resultLink = document.getElementById('result-link');
+        const errorMsg = document.getElementById('error-msg');
+
+        btn.addEventListener('click', async () => {
+            const url = input.value.trim();
+            if (!url) return;
+
+            btn.disabled = true;
+            errorMsg.style.display = 'none';
+            result.style.display = 'none';
+
+            try {
+                const res = await fetch(`/shorten?url=${encodeURIComponent(url)}`, {
+                    method: 'POST'
+                });
+
+                if (!res.ok) {
+                    const data = await res.json();
+                    throw new Error(data.detail || 'Something went wrong');
+                }
+
+                const data = await res.json();
+                const scaryUrl = window.location.origin + data.short_url;
+                resultLink.href = scaryUrl;
+                resultLink.textContent = scaryUrl;
+                result.style.display = 'block';
+            } catch (e) {
+                errorMsg.textContent = e.message;
+                errorMsg.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+            }
+        });
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') btn.click();
+        });
+    </script>
+</body>
+</html>
