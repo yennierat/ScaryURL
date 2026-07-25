@@ -21,6 +21,10 @@ redis_client = redis.from_url(os.environ["REDIS_URL"], decode_responses=True)
 CACHE_TTL = 60 * 60 * 24 * 7  # 7 days in seconds
 LINK_EXPIRY_DAYS = 90  # links expire after ~3 months
 
+VIOLATION_THRESHOLD = 10  # rate-limit hits before blocking
+VIOLATION_WINDOW = 86400  # 24 hours - window for counting violations
+BLOCK_DURATION = 86400  # 24 hours - how long a block lasts
+
 PREFIXES = ["lottery", "claim", "verify", "account", "secure", "free-gift","loan","login","moneyz","banking","account-update","secure-login","install","update","redeem"]
 SUFFIXES = ["now", "today", "urgent", "limited"]
 
@@ -138,3 +142,31 @@ def increment_clicks(combination: str) -> None:
         db.commit()
     finally:
         return_db(db)
+
+
+def record_rate_limit_violation(ip: str) -> bool:
+    try:
+        key = f"ratelimit:violations:{ip}"
+        count = redis_client.incr(key)
+        if count == 1:
+            redis_client.expire(key, VIOLATION_WINDOW)
+        return count >= VIOLATION_THRESHOLD
+    except redis.RedisError:
+        logger.error(f"Redis error recording violation for {ip}")
+        return False
+
+
+def block_ip(ip: str) -> None:
+    try:
+        redis_client.set(f"ratelimit:blocked:{ip}", "1", ex=BLOCK_DURATION)
+        redis_client.delete(f"ratelimit:violations:{ip}")
+    except redis.RedisError:
+        logger.error(f"Redis error blocking IP {ip}")
+
+
+def is_ip_blocked(ip: str) -> bool:
+    try:
+        return redis_client.exists(f"ratelimit:blocked:{ip}") > 0
+    except redis.RedisError:
+        logger.error(f"Redis error checking block status for {ip}")
+        return False

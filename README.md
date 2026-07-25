@@ -53,7 +53,7 @@ This starts the app, Postgres, and Redis together. The app is available at `http
 ## Running tests
 
 ```bash
-pytest test_app.py -v
+pytest tests.py -v
 ```
 
 Requires Postgres and Redis to be running (see setup above).
@@ -89,6 +89,12 @@ User submits URL
 User visits scary link
        |
        v
+  IP block check (Redis) -> blocked? -> 403 Forbidden
+       |
+       v
+  Rate limiter (10/min) -> exceeded? -> record violation -> 10th strike? -> block IP
+       |
+       v
   GET /{slug} -> parse combination from slug
        |
        v
@@ -113,7 +119,9 @@ User visits scary link
 
 **Connection pooling** — uses `psycopg2.ThreadedConnectionPool` to reuse database connections across requests. Connections are always returned to the pool via `try/finally`.
 
-**Rate limiting** — `slowapi` limits requests per IP (10/minute) to prevent abuse.
+**Rate limiting** — `slowapi` with Redis-backed storage limits requests per IP (10/minute). Rate limit state persists across restarts and is shared across workers.
+
+**IP abuse detection** — IPs that repeatedly hit the rate limit (10 violations within 24 hours) are automatically blocked for 24 hours. Violation counters and block flags are stored in Redis with TTLs, so they decay naturally. The system fails open — if Redis goes down, abuse detection degrades gracefully rather than blocking all traffic.
 
 **URL validation** — submitted URLs must have `http` or `https` scheme.
 

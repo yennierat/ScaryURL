@@ -7,7 +7,11 @@
 from datetime import datetime, timedelta
 import pytest
 from main import app, _parse_combination
-from database import generate_combination, generate_slug, PREFIXES, SUFFIXES
+from database import (
+    generate_combination, generate_slug, PREFIXES, SUFFIXES,
+    record_rate_limit_violation, block_ip, is_ip_blocked,
+    redis_client, VIOLATION_THRESHOLD
+)
 
 
 # --- Unit tests for generate_combination ---
@@ -154,3 +158,75 @@ def test_cache_populated_on_read(client):
 
     cached = redis_client.get(f"url:{combination}")
     assert cached == "https://readcache.com"
+
+
+# --- IP abuse detection and blocking tests ---
+
+@pytest.fixture(autouse=True)
+def cleanup_redis_keys():
+    for key in redis_client.scan_iter("ratelimit:*"):
+        redis_client.delete(key)
+    for key in redis_client.scan_iter("LIMITS:*"):
+        redis_client.delete(key)
+    yield
+    for key in redis_client.scan_iter("ratelimit:*"):
+        redis_client.delete(key)
+    for key in redis_client.scan_iter("LIMITS:*"):
+        redis_client.delete(key)
+
+
+def test_record_violation_increments_counter():
+    ip = "10.0.0.1"
+    record_rate_limit_violation(ip)
+    count = redis_client.get(f"ratelimit:violations:{ip}")
+    assert count == "1"
+
+
+def test_record_violation_returns_false_below_threshold():
+    ip = "10.0.0.2"
+    for _ in range(VIOLATION_THRESHOLD - 1):
+        result = record_rate_limit_violation(ip)
+        assert result is False
+
+
+def test_record_violation_returns_true_at_threshold():
+    ip = "10.0.0.3"
+    for i in range(VIOLATION_THRESHOLD):
+        result = record_rate_limit_violation(ip)
+    assert result is True
+
+
+def test_block_ip_sets_key():
+    ip = "10.0.0.4"
+    block_ip(ip)
+    assert is_ip_blocked(ip) is True
+
+
+def test_is_ip_blocked_returns_false_for_unblocked():
+    assert is_ip_blocked("10.0.0.99") is False
+
+
+def test_block_ip_cleans_violation_counter():
+    ip = "10.0.0.5"
+    record_rate_limit_violation(ip)
+    assert redis_client.exists(f"ratelimit:violations:{ip}") == 1
+    block_ip(ip)
+    assert redis_client.exists(f"ratelimit:violations:{ip}") == 0
+
+
+def test_blocked_ip_gets_403(client):
+    block_ip("testclient")
+    response = client.get("/")
+    assert response.status_code == 403
+    assert "blocked" in response.json()["detail"].lower()
+
+
+def test_blocked_ip_can_still_hit_health(client):
+    block_ip("testclient")
+    response = client.get("/health")
+    assert response.status_code == 200
+
+
+def test_unblocked_ip_passes_middleware(client):
+    response = client.get("/")
+    assert response.status_code == 200
